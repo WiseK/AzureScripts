@@ -24,10 +24,10 @@ $vmName = $vmInfo.Name
 
 # Uninstall the MDE.Windows extension
 $MDEExtensionName = "MDE.Windows"
-Remove-AzVMExtension -ResourceGroupName $resourceGroupName -VMName $vmName -Name $MDEExtensionName
+Remove-AzVMExtension -ResourceGroupName $resourceGroupName -VMName $vmName -Name $MDEExtensionName -Force
 
 # Uninstall the MicrosoftMonitoringAgent extension
 $monitoringExtensionName = "MicrosoftMonitoringAgent"
-Remove-AzVMExtension -ResourceGroupName $resourceGroupName -VMName $vmName -Name $monitoringExtensionName
+Remove-AzVMExtension -ResourceGroupName $resourceGroupName -VMName $vmName -Name $monitoringExtensionName -Force
 
 Write-Host "Extensions uninstalled successfully from VM $vmName in resource group $resourceGroupName"
