@@ -1,0 +1,56 @@
+# Checks if the VM is deallocated or running. If deallocated, the script will delete the VM.
+# If the VM is running, the script will check for active or disconnected sessions, and if any exists the script will skip these.
+# If the VM is running but has no active or disconnected sessions, then it will stop/deallocate the VM and delete it.
+              #Install-Module -Name Az.AVD -RequiredVersion -Force
+              #Import-Module Az.AVD
+              Connect-Avd -ClientID $clientID -ClientSecret $ClientSecret -TenantID $Tenantid -SubscriptionId $SubscriptionId
+              $HostPoolName = "<HostPoolName>"
+              $ResourceGroupName = "<ResourceGroupName>"
+              $SessionHosts = Get-AvdImageVersionStatus -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName -NotLatest
+
+              foreach ($sessionHost in $SessionHosts) {
+                  Write-Output "Checking VM: $($sessionHost.sessionHostName)"
+
+                  $hostname = $sessionHost.sessionHostName.Split("/")[-1]
+                  $shortHostname = $hostname.Replace('.FQDN','')
+
+                  $hostSessions = Get-AzWvdUserSession -ResourceGroupName $ResourceGroupName -HostPoolName $HostPoolName -SessionHostName $hostname
+
+                  $activeOrDisconnectedSessions = $hostSessions | Where-Object {$_.SessionState -in @('Active', 'Disconnected')}
+
+                  if ($activeOrDisconnectedSessions) {
+                      Write-Output "Active or disconnected sessions found on VM: $hostname. Skipping..."
+                      continue
+                  }
+
+                  $powerState = (Get-AvdSessionHostPowerState -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName -Name $hostname).powerstate
+
+                  if ($powerState -eq 'Running') {
+                      Write-Output "No active or disconnected sessions found on VM: $hostname. VM is running. Attempting to stop and deallocate VM: $shortHostname"
+
+                      $stopOperation = Stop-AzVM -ResourceGroupName $ResourceGroupName -Name $shortHostname -Force
+                      if ($stopOperation.Status -eq 'Succeeded') {
+                          Write-Output "VM: $shortHostname has been stopped and deallocated successfully."
+                      }
+                      else {
+                          Write-Output "Failed to stop and deallocate VM: $shortHostname. Reason: $($stopOperation.Error)"
+                      }
+
+                      # Check the power state again after the operation
+                      $powerStateAfter = (Get-AvdSessionHostPowerState -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName -Name $hostname).powerstate
+                      if ($powerStateAfter -eq 'Deallocated') {
+                          Write-Output "$hostname is deallocated"
+                          Remove-AvdSessionHost -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName -Name $hostname -DeleteAssociated
+                      }
+                      else {
+                          Write-Output "$hostname is still running"
+                      }
+                  }
+                  elseif ($powerState -eq 'Deallocated') {
+                      Write-Output "$hostname is already deallocated"
+                      Remove-AvdSessionHost -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName -Name $hostname -DeleteAssociated
+                  }
+                  else {
+                      Write-Output "Unrecognized power state for VM: $hostname"
+                  }
+              }
