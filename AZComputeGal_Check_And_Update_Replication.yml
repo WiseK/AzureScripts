@@ -1,0 +1,103 @@
+name: Maintenance- ACG Update Target Region Replication
+'on':
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Run Manually On Subscription
+        required: true
+        default: CORP
+        type: choice
+        options:
+          - CORP
+jobs:
+  Checkout_And_Login:
+    runs-on: ubuntu-latest
+    environment: '${{ github.event.inputs.environment}}'
+    name: Start Process
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: '${{secrets.AZURE}}'
+          enable-AzPSSession: true
+      - name: Check VM Image Replication
+        id: task-check-and-update
+        uses: azure/powershell@v1
+        with:
+          azPSVersion: latest
+          errorActionPreference: stop
+          inlineScript: |
+            $output = @()
+            $missingRegionsOutput = @()
+            $requiredRegions = @('East US', 'West US', 'Central US',  'South India', 'West India')
+
+            # Get all galleries in the subscription
+            $allGalleries = Get-AzGallery
+
+            foreach ($gallery in $allGalleries) {
+                $galleryName = $gallery.Name
+                $resourceGroupName = $gallery.ResourceGroupName
+
+                $imageDefinitions = Get-AzGalleryImageDefinition -ResourceGroupName $resourceGroupName -GalleryName $galleryName
+
+                foreach ($imageDef in $imageDefinitions) {
+                    $imageVersions = Get-AzGalleryImageVersion -ResourceGroupName $resourceGroupName -GalleryName $galleryName -GalleryImageDefinitionName $imageDef.Name
+                    $latestVersion = $imageVersions | Sort-Object -Property Name -Descending | Select-Object -First 1
+
+                    $replicationDetails = $latestVersion.PublishingProfile.TargetRegions
+
+                    # Check if the image is available in all required regions
+                    $imageRegions = $replicationDetails | ForEach-Object { $_.Name }
+                    $missingRegions = $requiredRegions | Where-Object { $_ -notin $imageRegions }
+
+                    if ($missingRegions) {
+                        $objMissing = [PSCustomObject]@{
+                            'ResourceGroupName' = $resourceGroupName
+                            'GalleryName'       = $galleryName
+                            'ImageName'         = $imageDef.Name
+                            'MissingRegions'    = ($missingRegions -join ', ')
+                        }
+                        $missingRegionsOutput += $objMissing
+
+                        # Prepare missing regions in the expected format for update cmdlet
+                        $missingRegionsHash = $missingRegions | ForEach-Object {
+                            @{
+                                Name = $_
+                                RegionalReplicaCount = 1
+                                StorageAccountType = 'Standard_LRS'
+                            }
+                        }
+
+                        # Update gallery image version with missing target regions using WhatIf
+                        #Update-AzGalleryImageVersion `
+                            -ResourceGroupName $resourceGroupName `
+                            -GalleryName $galleryName `
+                            -GalleryImageDefinitionName $imageDef.Name `
+                            -Name $latestVersion.Name `
+                            -TargetRegion $missingRegionsHash `
+                            -WhatIf
+                    }
+
+                    foreach ($detail in $replicationDetails) {
+                        $obj = [PSCustomObject]@{
+                            'ResourceGroupName'    = $resourceGroupName
+                            'GalleryName'          = $galleryName
+                            'ImageName'            = $imageDef.Name
+                            'LatestVersion'        = $latestVersion.Name
+                            'TargetRegion'         = $detail.Name
+                            'RegionalReplicaCount' = $detail.RegionalReplicaCount
+                            'StorageAccountType'   = $detail.StorageAccountType
+                            'ProvisioningState'    = $latestVersion.ProvisioningState
+                        }
+                        $output += $obj
+                    }
+                }
+            }
+
+            # Display details
+            $output | Format-Table -AutoSize
+            Write-Host "`nImages Missing in Required Regions:" -ForegroundColor Yellow
+            $missingRegionsOutput | Format-Table -AutoSize
+
