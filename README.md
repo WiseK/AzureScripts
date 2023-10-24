@@ -1,2 +1,2 @@
 # AzureScripts
-Scripts for Azure and Azure Virtual Desktops
+Scripts in this repo are mainly for managing Azure resources and Azure Virtual Desktops.
