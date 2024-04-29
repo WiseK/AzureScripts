@@ -15,13 +15,21 @@ Invoke-WebRequest -Uri $clientUrl -OutFile $clientDestPath
 Invoke-WebRequest -Uri $serverUrl -OutFile $serverDestPath
 
 # Run DISM commands to add the OpenSSH Client and Server capabilities
-$clientInstallResult = dism /Online /Add-Capability /CapabilityName:OpenSSH.Client~~~~0.0.1.0 /source:C:\OpenSSH /LimitAccess
-$serverInstallResult = dism /Online /Add-Capability /CapabilityName:OpenSSH.Server~~~~0.0.1.0 /source:C:\OpenSSH /LimitAccess
+dism /Online /Add-Capability /CapabilityName:OpenSSH.Client~~~~0.0.1.0 /source:C:\OpenSSH /LimitAccess
+$clientInstallSuccess = $LASTEXITCODE -eq 0
+
+dism /Online /Add-Capability /CapabilityName:OpenSSH.Server~~~~0.0.1.0 /source:C:\OpenSSH /LimitAccess
+$serverInstallSuccess = $LASTEXITCODE -eq 0
 
 # Check if both DISM commands were successful
-if ($clientInstallResult.ExitCode -eq 0 -and $serverInstallResult.ExitCode -eq 0) {
+if ($clientInstallSuccess -and $serverInstallSuccess) {
     # If successful, delete the OpenSSH folder and its contents
     Remove-Item -Path $folderPath -Recurse -Force
 } else {
-    Write-Host "Error: Installation failed. Client install exit code: $($clientInstallResult.ExitCode), Server install exit code: $($serverInstallResult.ExitCode)."
+    if (-not $clientInstallSuccess) {
+        Write-Host "Error: OpenSSH Client installation failed with exit code $LASTEXITCODE."
+    }
+    if (-not $serverInstallSuccess) {
+        Write-Host "Error: OpenSSH Server installation failed with exit code $LASTEXITCODE."
+    }
 }
